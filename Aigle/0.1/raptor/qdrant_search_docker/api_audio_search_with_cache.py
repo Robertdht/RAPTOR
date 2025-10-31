@@ -63,7 +63,6 @@ cm = CacheManager(
 
 @app.on_event("startup")
 async def startup_event():
-    """應用啟動時初始化"""
     global client, model
     
     qdrant_host = os.getenv("QDRANT_HOST", "localhost")
@@ -73,54 +72,45 @@ async def startup_event():
     client = AsyncQdrantClient(host=qdrant_host, port=qdrant_port)
     
     try:
-        collection_info = client.get_collection(collection_name)
+        collection_info = await client.get_collection(collection_name)
         print(f"✅ Collection '{collection_name}' 已存在")
         print(f"   - 向量數量: {collection_info.vectors_count}")
         print(f"   - 點數量: {collection_info.points_count}")
-    except Exception as e:
+    except Exception:
         print(f"⚠️  Collection '{collection_name}' 不存在，正在創建...")
-        try:
-            from qdrant_client.models import VectorParams, Distance
-            
-            client.create_collection(
-                collection_name=collection_name,
-                vectors_config=VectorParams(
-                    size=1024,  
-                    distance=Distance.COSINE
+        from qdrant_client.models import VectorParams, Distance
+        
+        await client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=1024, distance=Distance.COSINE)
+        )
+        print(f"✅ 成功創建 collection: {collection_name}")
+        
+        index_fields = [
+            ("embedding_type", "keyword"),
+            ("type", "keyword"),
+            ("filename", "keyword"),
+            ("status", "keyword"),
+        ]
+        if collection_name in ["videos", "audios"]:
+            index_fields.append(("speaker", "keyword"))
+        elif collection_name in ["images", "documents"]:
+            index_fields.append(("source", "keyword"))
+        
+        print(f"📊 正在創建索引...")
+        for field_name, field_type in index_fields:
+            try:
+                await client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=field_name,
+                    field_schema=field_type
                 )
-            )
-            print(f"✅ 成功創建 collection: {collection_name}")
-            
-            index_fields = [
-                ("embedding_type", "keyword"),
-                ("type", "keyword"),
-                ("filename", "keyword"),
-                ("status", "keyword"),
-            ]
-            
-            if collection_name in ["videos", "audios"]:
-                index_fields.append(("speaker", "keyword"))
-            elif collection_name in ["images", "documents"]:
-                index_fields.append(("source", "keyword"))
-            
-            print(f"📊 正在創建索引...")
-            for field_name, field_type in index_fields:
-                try:
-                    client.create_payload_index(
-                        collection_name=collection_name,
-                        field_name=field_name,
-                        field_schema=field_type
-                    )
-                    print(f"   ✅ 索引 '{field_name}' 創建成功")
-                except Exception as idx_err:
-                    if "already exists" in str(idx_err).lower():
-                        print(f"   ℹ️  索引 '{field_name}' 已存在")
-                    else:
-                        print(f"   ⚠️  索引 '{field_name}' 創建失敗: {idx_err}")
-            
-        except Exception as create_err:
-            print(f"❌ 創建 collection 失敗: {create_err}")
-            raise
+                print(f"   ✅ 索引 '{field_name}' 創建成功")
+            except Exception as e:
+                if "already exists" in str(e).lower():
+                    print(f"   ℹ️ 索引 '{field_name}' 已存在")
+                else:
+                    print(f"   ⚠️ 索引 '{field_name}' 創建失敗: {e}")
     
     print("🤖 正在載入向量模型 (BAAI/bge-m3)...")
     model = SentenceTransformer("BAAI/bge-m3")
@@ -152,11 +142,10 @@ async def health_check():
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"服務不可用: {str(e)}")
 
-
 @cm.cache
-def cached_search(collection_name, query_vector, query_filter, limit):
+async def cached_search(collection_name, query_vector, query_filter, limit):
     """具快取的 Qdrant 搜尋"""
-    results = client.search(
+    results = await client.search(
         collection_name=collection_name,
         query_vector=query_vector,
         query_filter=query_filter,
@@ -213,7 +202,7 @@ async def search_audio(request: SearchRequest):
         
         query_vector = model.encode(request.query_text).tolist()
         
-        results = cached_search(
+        results = await cached_search(
             collection_name=collection_name,
             query_vector=query_vector,
             query_filter=query_filter,

@@ -4,7 +4,6 @@ import uuid
 from typing import Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from sentence_transformers import SentenceTransformer
-from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
 from qdrant_client import AsyncQdrantClient
 
@@ -24,8 +23,8 @@ async def startup_event():
     print(f"🔌 正在連接 Qdrant ({qdrant_host}:{qdrant_port})...")
     try:
         client = AsyncQdrantClient(host=qdrant_host, port=qdrant_port, timeout=10)
-        collections = client.get_collections()
-        print(f"✅ 成功連接到 Qdrant")
+        collections = await client.get_collections()
+        print(f"✅ 成功連接到 Qdrant，共 {len(collections.collections)} 個 collections")
     except Exception as e:
         print(f"❌ 無法連接到 Qdrant: {e}")
         raise
@@ -41,14 +40,14 @@ async def startup_event():
     print("🚀 Insert API 已就緒！")
 
 
-def ensure_collection_exists(collection_name: str) -> None:
+async def ensure_collection_exists(collection_name: str) -> None:
     """確保 collection 存在"""
     try:
-        client.get_collection(collection_name)
+        await client.get_collection(collection_name)
         print(f"✅ Collection '{collection_name}' 已存在")
     except:
         print(f"⚠️  Collection '{collection_name}' 不存在，正在創建...")
-        client.create_collection(
+        await client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(size=1024, distance=Distance.COSINE)
         )
@@ -67,19 +66,13 @@ def extract_embedding_content(payload: Dict[str, Any]) -> str:
 
 @app.get("/")
 async def root():
-    """根路徑"""
-    return {
-        "message": "Qdrant Data Inserter API",
-        "version": "1.0.0",
-        "status": "running"
-    }
+    return {"message": "Qdrant Data Inserter API", "version": "1.0.0", "status": "running"}
 
 
 @app.get("/health")
 async def health():
-    """健康檢查"""
     try:
-        client.get_collections()
+        await client.get_collections()
         return {"status": "healthy"}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"服務不可用: {str(e)}")
@@ -91,7 +84,6 @@ async def insert_json(file: UploadFile = File(...)):
     try:
         raw_data = await file.read()
         data = json.loads(raw_data.decode("utf-8"))
-        
         if isinstance(data, dict):
             data = [data]
         
@@ -107,40 +99,30 @@ async def insert_json(file: UploadFile = File(...)):
         
         results = {}
         for collection_name, items in grouped_data.items():
-            ensure_collection_exists(collection_name)
+            await ensure_collection_exists(collection_name)
             
             points = []
             for item in items:
                 payload = item.get("payload", {})
                 content = extract_embedding_content(payload)
-                
                 if not content:
                     continue
                 
                 vector = model.encode(content).tolist()
                 point_id = item.get("id", str(uuid.uuid4()))
                 
-                points.append(
-                    PointStruct(
-                        id=point_id,
-                        vector=vector,
-                        payload=payload
-                    )
-                )
+                points.append(PointStruct(id=point_id, vector=vector, payload=payload))
             
             if points:
-                client.upsert(collection_name=collection_name, points=points)
+                await client.upsert(collection_name=collection_name, points=points)
                 results[collection_name] = len(points)
                 print(f"✅ 插入 {len(points)} 筆數據到 {collection_name}")
         
-        return {
-            "status": "success",
-            "message": "成功插入數據",
-            "results": results
-        }
+        return {"status": "success", "message": "成功插入數據", "results": results}
         
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"JSON 格式錯誤: {str(e)}")
     except Exception as e:
         print(f"❌ 插入失敗: {str(e)}")
         raise HTTPException(status_code=500, detail=f"插入失敗: {str(e)}")
+fix
