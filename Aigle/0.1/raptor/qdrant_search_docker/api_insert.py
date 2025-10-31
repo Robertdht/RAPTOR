@@ -6,6 +6,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
+from qdrant_client import AsyncQdrantClient
 
 app = FastAPI(title="Qdrant Data Inserter API")
 
@@ -22,7 +23,7 @@ async def startup_event():
     
     print(f"🔌 正在連接 Qdrant ({qdrant_host}:{qdrant_port})...")
     try:
-        client = QdrantClient(host=qdrant_host, port=qdrant_port, timeout=10)
+        client = AsyncQdrantClient(host=qdrant_host, port=qdrant_port, timeout=10)
         collections = client.get_collections()
         print(f"✅ 成功連接到 Qdrant")
     except Exception as e:

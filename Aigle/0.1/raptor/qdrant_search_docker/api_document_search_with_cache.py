@@ -10,6 +10,7 @@ import uvicorn
 import time
 from functools import wraps
 from cache_manager import CacheManager
+from qdrant_client import AsyncQdrantClient
 
 class SearchRequest(BaseModel):
     """搜索請求模型"""
@@ -70,7 +71,7 @@ async def startup_event():
     qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
     
     print(f"🔌 正在連接 Qdrant ({qdrant_host}:{qdrant_port})...")
-    client = QdrantClient(host=qdrant_host, port=qdrant_port)
+    client = AsyncQdrantClient(host=qdrant_host, port=qdrant_port)
     
     # ✅ 檢查並自動創建 collection
     try:
